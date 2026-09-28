@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Municode · Sur de la Florida — Life City</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<header class="top">
+  <button id="btnMenu" class="ico" aria-label="Jurisdicciones">☰</button>
+  <div class="brand"><b>MUNICODE</b> · SUR DE LA FLORIDA</div>
+  <div class="actual" id="actual">Elige una jurisdicción</div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="codigo" class="on">Código</button>
+    <button data-tab="lote">Lote y fuentes</button>
+    <button data-tab="masa">Masa 3D</button>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <!-- ============ jurisdicciones ============ -->
+  <aside class="lista" id="lista">
+    <div class="condados" id="condados"></div>
+    <input id="filtro" type="search" placeholder="Filtrar ciudad…" autocomplete="off">
+    <div class="items" id="items"></div>
+    <div class="pie" id="pieLista"></div>
+  </aside>
+
+  <main>
+
+    <!-- ============ código ============ -->
+    <section class="tab on" id="tab-codigo">
+      <div class="barra">
+        <select id="selProducto" title="Documento"></select>
+        <form id="fBuscar" class="buscar">
+          <input id="qBuscar" type="search" placeholder="Buscar en el código (ej. setback, height, RU-1)…">
+          <button>Buscar</button>
+        </form>
+        <a id="lnkBiblioteca" class="btn sec" target="_blank" rel="noopener">Abrir en Municode ↗</a>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="vigencia" id="vigencia"></div>
+      <div class="codigo">
+        <div class="toc" id="toc"><p class="hint">Elige una jurisdicción de la lista para cargar su código.</p></div>
+        <div class="contenido" id="contenido">
+          <div class="bienvenida">
+            <h1>Consulta la normativa de cualquier ciudad</h1>
+            <p>Miami-Dade, Broward y Palm Beach: <b id="nTotal">—</b> jurisdicciones. Lee el código, ubica el lote con sus fuentes oficiales y modela la masa potencial en 3D.</p>
+            <ol>
+              <li><b>Código</b> — índice completo, texto y búsqueda del código de cada ciudad.</li>
+              <li><b>Lote y fuentes</b> — parcela, zoning, Property Appraiser, GIS y sitios oficiales.</li>
+              <li><b>Masa 3D</b> — setbacks, pisos, número de edificios y distancia entre ellos.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ lote y fuentes ============ -->
+    <section class="tab" id="tab-lote">
+      <div class="lote">
+        <div class="mapa-wrap">
+          <form id="fDir" class="buscar sobre">
+            <input id="qDir" type="search" placeholder="Dirección (ej. 301 N Olive Ave, West Palm Beach)">
+            <button>Ubicar</button>
+          </form>
+          <div id="mapa"></div>
+        </div>
+        <div class="panel" id="panelLote">
+          <h2>Lote</h2>
+          <div id="loteInfo"><p class="hint">Toca el mapa sobre un lote o escribe la dirección. La parcela sale del catastro estatal de la Florida.</p></div>
+          <h2>Zoning</h2>
+          <div id="zonaInfo"><p class="hint">Se detecta al elegir el lote, donde el condado o la ciudad publican la capa.</p></div>
+          <button id="btnAMasa" class="btn" disabled>Modelar masa de este lote →</button>
+          <h2>Fuentes oficiales</h2>
+          <div id="fuentes"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ masa 3D ============ -->
+    <section class="tab" id="tab-masa">
+      <div class="masa">
+        <div class="panel controles">
+          <h2>Lote</h2>
+          <div id="masaLote" class="hint">Sin lote del catastro: usa un lote rectangular.</div>
+          <div class="fila2">
+            <label>Frente (ft)<input id="inFrente" type="number" min="20" value="200"></label>
+            <label>Fondo (ft)<input id="inFondo" type="number" min="20" value="300"></label>
+          </div>
+          <button id="btnRect" class="btn sec">Usar lote rectangular</button>
+
+          <h2>Edificios</h2>
+          <div class="sl"><label>Número de edificios <b id="vNum">1</b></label><input type="range" id="sNum" min="1" max="8" step="1" value="1"></div>
+          <div class="sl"><label>Distancia entre edificios (ft) <b id="vSep">40</b></label><input type="range" id="sSep" min="0" max="200" step="5" value="40"></div>
+          <div class="fila2">
+            <label>Disposición
+              <select id="selEje">
+                <option value="frente">A lo largo del frente</option>
+                <option value="fondo">En profundidad</option>
+              </select>
+            </label>
+            <label>&nbsp;<button id="btnFrente" class="btn sec" type="button">↻ Girar frente</button></label>
+          </div>
+
+          <h2>Volumen</h2>
+          <div class="sl"><label>Pisos <b id="vPisos">8</b></label><input type="range" id="sPisos" min="1" max="60" step="1" value="8"></div>
+          <div class="sl"><label>Altura de piso (ft) <b id="vFh">10</b></label><input type="range" id="sFh" min="8" max="20" step="0.5" value="10"></div>
+
+          <h2>Setbacks</h2>
+          <div class="sl"><label>Frente (ft) <b id="vAnte">25</b></label><input type="range" id="sAnte" min="0" max="100" step="1" value="25"></div>
+          <div class="sl"><label>Lateral (ft) <b id="vLat">15</b></label><input type="range" id="sLat" min="0" max="60" step="1" value="15"></div>
+          <div class="sl"><label>Posterior (ft) <b id="vPost">25</b></label><input type="range" id="sPost" min="0" max="100" step="1" value="25"></div>
+
+          <h2>Límites del código <span class="nota">opcional</span></h2>
+          <div class="fila2">
+            <label>FAR máx.<input id="inFar" type="number" min="0" step="0.05" placeholder="—"></label>
+            <label>Altura máx. (ft)<input id="inAlt" type="number" min="0" step="1" placeholder="—"></label>
+          </div>
+          <div class="fila2">
+            <label>Ocupación máx. (%)<input id="inCob" type="number" min="0" max="100" step="1" placeholder="—"></label>
+            <label>Densidad (un/acre)<input id="inDen" type="number" min="0" step="1" placeholder="—"></label>
+          </div>
+          <button id="btnAjustar" class="btn sec">Ajustar pisos a los límites</button>
+          <p class="hint">Los límites no vienen del GIS: tómalos del código. Búscalos aquí:</p>
+          <div class="chips" id="chipsMasa"></div>
+        </div>
+
+        <div class="vista">
+          <div class="lienzo">
+            <canvas id="canvas3d"></canvas>
+            <div class="vbtns">
+              <button id="btnIso" class="btn sec">Iso</button>
+              <button id="btnTop" class="btn sec">Planta</button>
+              <button id="btnPng" class="btn sec">PNG</button>
+              <button id="btnJson" class="btn sec">JSON</button>
+            </div>
+            <div class="aviso" id="masaAviso"></div>
+          </div>
+          <div class="metricas" id="metricas"></div>
+          <div class="tabla" id="tablaEd"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
