@@ -384,6 +384,7 @@ export const Masa = {
       { origen: 'rectangular', frente_ft: frente, fondo_ft: fondo }, 0);
   },
   tieneLote: () => !!E.lote,
+  areaDe: (pts) => areaAbs(pts),
   exportar: () => (E.lote ? exportar() : null),
   mostrar() { if (listo) { redimensionar(); } },
   iniciar({ toast, onCambio }) {

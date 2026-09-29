@@ -1,5 +1,5 @@
-import { Masa, anilloAPies } from './masa.js';
-import { PARCELAS, CONDADOS, CIUDADES, GENERALES, condadoPorCoNo } from './fuentes.js';
+import { Masa, anilloAPies } from './masa.js?v=4';
+import { PARCELAS, CONDADOS, CIUDADES, GENERALES, condadoPorCoNo, ordenCondados } from './fuentes.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 const API = (window.MUNI_CONFIG?.api ?? '/api/municode').replace(/\/$/, '');
@@ -101,6 +101,7 @@ async function elegir(j, { volar = false } = {}) {
   $('actual').textContent = `${j.nombre} · ${S.catalogo.condados[j.condado].nombre}`;
   pintarLista(); pintarFuentes(); pintarChips();
   if (volar) volarA(j);
+  actualizarCapaZoning();
 
   $('selProducto').innerHTML = ''; $('vigencia').textContent = '';
   $('lnkBiblioteca').href = j.biblioteca || j.fuente_externa;
@@ -259,7 +260,8 @@ for (const id of ['chips', 'chipsMasa']) {
 }
 
 /* ====================== mapa y lote ====================== */
-let mapa, capaLote, marcador;
+let mapa, capaLote, marcador, capaZoning, leyenda;
+const geojsonZoning = {};   // por ciudad: se descarga una sola vez
 
 function iniciarMapa() {
   if (mapa) return;
@@ -268,7 +270,56 @@ function iniciarMapa() {
     maxZoom: 19, attribution: '© OpenStreetMap · Parcelas: Florida Statewide Cadastral',
   }).addTo(mapa);
   mapa.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng));
+  mapa.createPane('zoning').style.zIndex = 350;   // bajo el lote, sobre el mapa base
+  actualizarCapaZoning();
   if (S.pendienteVolar) { const [c, z] = S.pendienteVolar; mapa.setView(c, z); S.pendienteVolar = null; }
+}
+
+/** Pinta el mapa de zonificación de la ciudad elegida, si publica uno, con su leyenda. */
+async function actualizarCapaZoning() {
+  if (!mapa) return;
+  if (capaZoning) { capaZoning.remove(); capaZoning = null; }
+  if (leyenda) { leyenda.remove(); leyenda = null; }
+  const j = S.j, cfg = j && CIUDADES[j.clave]?.mapa;
+  if (!cfg) return;
+
+  const color = Object.fromEntries(cfg.clases.map(([k, c]) => [k, c]));
+  leyenda = L.control({ position: 'bottomleft' });
+  leyenda.onAdd = () => {
+    const d = L.DomUtil.create('div', 'leyenda');
+    d.innerHTML = `<label class="ley-t"><input type="checkbox" id="leyVer" checked> ${esc(cfg.titulo)}</label>
+      <div id="leyCuerpo"><input type="range" id="leyOp" min="10" max="100" value="60" title="Opacidad">
+      <div class="ley-items">${cfg.clases.map(([k, c, n]) =>
+        `<div><i style="background:${c}"></i><b>${esc(k)}</b> ${esc(n)}</div>`).join('')}</div>
+      <small id="leyEstado"><span class="spin"></span>Cargando…</small></div>`;
+    L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+    return d;
+  };
+  leyenda.addTo(mapa);
+  const estilo = () => ({ fillOpacity: $('leyOp').value / 100 });
+  $('leyVer').onchange = (e) => {
+    $('leyCuerpo').hidden = !e.target.checked;
+    if (capaZoning) (e.target.checked ? capaZoning.addTo(mapa) : capaZoning.remove());
+  };
+  $('leyOp').oninput = () => capaZoning?.setStyle(estilo());
+
+  try {
+    geojsonZoning[j.clave] ??= await fetch(`${cfg.url}/query?` + new URLSearchParams({
+      where: '1=1', outFields: cfg.campos, outSR: 4326, geometryPrecision: 6, maxAllowableOffset: 0.00001, f: 'geojson',
+    })).then((r) => r.json());
+    if (S.j !== j) return;
+    const gj = geojsonZoning[j.clave];
+    if (!gj.features?.length) throw new Error('sin datos');
+    capaZoning = L.geoJSON(gj, {
+      pane: 'zoning', interactive: false,
+      style: (f) => ({ color: '#33414f', weight: .6, fillColor: color[f.properties[cfg.campo]] || '#cccccc', ...estilo() }),
+    });
+    if ($('leyVer').checked) capaZoning.addTo(mapa);
+    $('leyEstado').textContent = `${fmt(gj.features.length)} zonas · ${cfg.fuente}`;
+  } catch {
+    delete geojsonZoning[j.clave];
+    if ($('leyEstado')) $('leyEstado').textContent = 'La capa de zoning no respondió.';
+  }
 }
 
 async function geocodificar(q) {
@@ -316,6 +367,30 @@ async function consultarCapa(url, lat, lon, { geometria = false, campos = '*', r
 
 const areaAnillo = (r) => Math.abs(r.reduce((s, c, i) => { const p = r[(i + r.length - 1) % r.length]; return s + p[0] * c[1] - c[0] * p[1]; }, 0));
 
+/** Busca el lote en la capa de cada condado, empezando por el que toca según la latitud. */
+async function buscarParcela(lat, lon, direccion) {
+  const orden = ordenCondados(lat);
+  const capas = PARCELAS.filter((p) => !p.estatal)
+    .sort((x, y) => orden.indexOf(x.condado) - orden.indexOf(y.condado))
+    .concat(PARCELAS.filter((p) => p.estatal));
+  const numero = direccion.match(/^\s*(\d+)/)?.[1];
+  let fallos = 0;
+  for (const radioM of direccion ? [0, 40] : [0]) {
+    for (const capa of capas) {
+      try {
+        const fs = await consultarCapa(capa.url, lat, lon, { geometria: true, radioM });
+        const lotes = fs.filter((f) => f.geometry?.rings?.length).map((f) => ({ f, d: capa.leer(f.attributes) }));
+        const l = lotes.find((x) => numero && x.d.direccion?.startsWith(numero + ' ')) || lotes[0];
+        if (!l) continue;
+        const condado = capa.condado || condadoPorCoNo(S.catalogo, l.d.coNo);
+        if (!condado) return { fuera: true };
+        return { f: l.f, d: l.d, condado, fuente: capa.fuente };
+      } catch { fallos++; }
+    }
+  }
+  return { fallos, total: capas.length };
+}
+
 /** `direccion`: si viene de una búsqueda, el punto suele caer en la vía; se busca el lote vecino. */
 async function ubicar(lat, lon, direccion = '') {
   if (marcador) marcador.remove();
@@ -324,62 +399,63 @@ async function ubicar(lat, lon, direccion = '') {
   $('zonaInfo').innerHTML = ''; $('btnAMasa').disabled = true;
   S.lote = null; S.zona = null;
 
-  let f;
-  try {
-    [f] = await consultarCapa(PARCELAS, lat, lon, { geometria: true });
-    if (!f && direccion) {
-      const cerca = await consultarCapa(PARCELAS, lat, lon, { geometria: true, radioM: 40 });
-      const numero = direccion.match(/^\s*(\d+)/)?.[1];
-      f = cerca.find((c) => numero && String(c.attributes.PHY_ADDR1 || '').startsWith(numero + ' ')) || cerca[0];
-    }
-  } catch (e) {
-    $('loteInfo').innerHTML = `<p class="hint">El catastro no respondió: ${esc(e.message)}</p>`; return;
-  }
-  if (!f?.geometry?.rings?.length) {
-    $('loteInfo').innerHTML = '<p class="hint">No hay un lote en ese punto (puede ser una vía o un cuerpo de agua). Toca dentro de un predio.</p>';
-    return;
-  }
-  const a = f.attributes;
-  const condado = condadoPorCoNo(S.catalogo, a.CO_NO);
-  if (!condado) {
+  const r = await buscarParcela(lat, lon, direccion);
+  if (r.fuera) {
     $('loteInfo').innerHTML = '<p class="hint">Ese lote está fuera de Miami-Dade, Broward y Palm Beach.</p>';
     return;
   }
-  const anillo = f.geometry.rings.reduce((m, r) => (areaAnillo(r) > areaAnillo(m) ? r : m));
+  if (!r.f) {
+    $('loteInfo').innerHTML = r.fallos >= r.total
+      ? '<p class="hint">Las capas de parcelas no respondieron. Intenta de nuevo en un momento.</p>'
+      : '<p class="hint">No hay un lote en ese punto (puede ser una vía o un cuerpo de agua). Toca dentro de un predio.</p>';
+    return;
+  }
+  const { d, condado } = r;
+  const anillo = r.f.geometry.rings.reduce((m, x) => (areaAnillo(x) > areaAnillo(m) ? x : m));
   const pts = anilloAPies(anillo);
   const centro = L.polygon(anillo.map(([x, y]) => [y, x])).getBounds().getCenter();
   if (direccion) { lat = centro.lat; lon = centro.lng; }
-  S.lote = { a, condado, anillo, pts, lat, lon, id: a.PARCEL_ID || a.PARCELNO };
+  S.lote = { d, condado, anillo, pts, lat, lon, id: d.id };
 
   if (capaLote) capaLote.remove();
   capaLote = L.polygon(anillo.map(([x, y]) => [y, x]), { color: '#3aa0ff', weight: 2, fillOpacity: .25 }).addTo(mapa);
   mapa.fitBounds(capaLote.getBounds(), { maxZoom: 19, padding: [60, 60] });
 
-  const dir = [a.PHY_ADDR1, a.PHY_CITY, a.PHY_ZIPCD].filter(Boolean).join(', ');
+  const areaMedida = Masa.areaDe(pts);
   const filas = [
-    ['Dirección', dir || '—'], ['Parcel ID', S.lote.id], ['Condado', S.catalogo.condados[condado].nombre],
-    ['Área (appraiser)', a.LND_SQFOOT ? `${fmt(a.LND_SQFOOT)} sf · ${fmt(a.LND_SQFOOT / 43560, 2)} acres` : '—'],
-    ['Año construido', a.ACT_YR_BLT || '—'], ['Área construida', a.TOT_LVG_AR ? `${fmt(a.TOT_LVG_AR)} sf` : '—'],
-    ['Avalúo (JV)', a.JV ? `$${fmt(a.JV)}` : '—'], ['Valor del suelo', a.LND_VAL ? `$${fmt(a.LND_VAL)}` : '—'],
-    ['Uso (DOR)', a.DOR_UC || '—'], ['Propietario', a.OWN_NAME || '—'], ['Legal', a.S_LEGAL || '—'],
-  ];
+    ['Dirección', [d.direccion, d.ciudad, d.zip].filter(Boolean).join(', ')], ['Parcel ID', d.id],
+    ['Condado', S.catalogo.condados[condado].nombre],
+    ['Área (appraiser)', d.areaSf && `${fmt(d.areaSf)} sf · ${fmt(d.areaSf / 43560, 2)} acres`],
+    ['Área (medida)', `${fmt(areaMedida)} sf · ${fmt(areaMedida / 43560, 2)} acres`],
+    ['Año construido', d.anio], ['Área construida', d.construidaSf && `${fmt(d.construidaSf)} sf`],
+    ['Avalúo', d.valor && `$${fmt(d.valor)}`], ['Valor del suelo', d.valorSuelo && `$${fmt(d.valorSuelo)}`],
+    ['Uso', d.uso], ['Propietario', d.propietario], ['Legal', d.legal],
+  ].filter(([, v]) => v);
   $('loteInfo').innerHTML = `<div class="kv">${filas.map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('')}</div>
-    <p class="hint">Fuente: Florida Statewide Cadastral, rol ${esc(a.ASMNT_YR || '')}.</p>`;
+    <p class="hint">Fuente: ${esc(r.fuente)}. Lo que falte está en la ficha del Property Appraiser.</p>`;
   $('btnAMasa').disabled = false;
 
-  await detectarZona(lat, lon, condado, a);
+  await detectarZona(lat, lon, condado, d);
   pintarFuentes(); pintarChips();
 }
 
 /** Zoning por punto y, de paso, la jurisdicción a la que pertenece el lote. */
-async function detectarZona(lat, lon, condado, a) {
+async function detectarZona(lat, lon, condado, d) {
   const enCondado = (clave) => S.catalogo.jurisdicciones.find((j) => j.condado === condado && j.clave === clave);
   const gobierno = S.catalogo.jurisdicciones.find((j) => j.condado === condado && j.tipo === 'condado');
-  let j = enCondado(norm(a.PHY_CITY));
-  let origenJ = j ? 'la ciudad postal del lote' : null;
-  let zona = null;
+  let j = null, origenJ = null, zona = null;
 
   $('zonaInfo').innerHTML = '<p class="hint"><span class="spin"></span>Consultando zoning…</p>';
+  // La jurisdicción sale del límite municipal oficial; la ciudad de la ficha es el respaldo.
+  const lim = CONDADOS[condado].municipios;
+  try {
+    const [m] = await consultarCapa(lim.url, lat, lon, { campos: lim.campo });
+    if (m) {
+      j = enCondado(norm(m.attributes[lim.campo])) || gobierno;
+      origenJ = j === gobierno ? 'los límites municipales (área no incorporada)' : 'los límites municipales del condado';
+    }
+  } catch { /* se usa el respaldo */ }
+  if (!j && enCondado(norm(d.ciudad))) { j = enCondado(norm(d.ciudad)); origenJ = 'la ciudad de la ficha del lote'; }
   const capas = [...(j && CIUDADES[j.clave]?.zoning || []), ...CONDADOS[condado].zoning];
   for (const capa of capas) {
     try {
@@ -389,7 +465,8 @@ async function detectarZona(lat, lon, condado, a) {
       if (/unincorporated/i.test(ciudad)) { j = gobierno; origenJ = 'la capa de zoning (área no incorporada)'; continue; }
       if (ciudad && enCondado(norm(ciudad))) { j = enCondado(norm(ciudad)); origenJ = 'la capa de zoning municipal'; }
       if (capa.noIncorporado) { j = gobierno; origenJ = 'la capa de zoning del condado'; }
-      const cod = String(z.attributes[capa.zona] || '').trim();
+      if (capa.confirma) origenJ = 'la capa de zoning de la ciudad';
+      const cod = String(z.attributes[capa.zona] || '').replace(/\s*\(.*\)\s*$/, '').trim();   // «PUD (city)» → «PUD»
       if (cod && cod.toUpperCase() !== 'NONE') { zona = { zona: cod, desc: z.attributes[capa.desc] || '', fuente: capa.fuente }; break; }
     } catch { /* la capa no respondió: se prueba la siguiente */ }
   }
@@ -419,10 +496,10 @@ async function detectarZona(lat, lon, condado, a) {
 
 $('btnAMasa').onclick = async () => {
   if (!S.lote) return;
-  const a = S.lote.a;
-  $('masaLote').innerHTML = `<b>${esc(a.PHY_ADDR1 || S.lote.id)}</b> · ${esc(S.j?.nombre || '')}${S.zona ? ` · zoning <b>${esc(S.zona.zona)}</b>` : ''}`;
+  const d = S.lote.d;
+  $('masaLote').innerHTML = `<b>${esc(d.direccion || S.lote.id)}</b> · ${esc(S.j?.nombre || '')}${S.zona ? ` · zoning <b>${esc(S.zona.zona)}</b>` : ''}`;
   const listo = Masa.setLote(S.lote.pts, {
-    origen: 'catastro', parcel_id: S.lote.id, direccion: a.PHY_ADDR1, ciudad: a.PHY_CITY,
+    origen: 'catastro', parcel_id: S.lote.id, direccion: d.direccion || null, ciudad: d.ciudad || null,
     jurisdiccion: S.j?.nombre, zoning: S.zona?.zona || null, lat: S.lote.lat, lon: S.lote.lon,
   });
   irATab('masa');

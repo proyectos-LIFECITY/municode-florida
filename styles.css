@@ -148,6 +148,12 @@ main { min-width: 0; min-height: 0; overflow: hidden; }
 @keyframes g { to { transform: rotate(360deg); } }
 
 .leaflet-container { font: inherit; }
+.leyenda { background: var(--bg2); color: var(--txt); border: 1px solid var(--linea); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-width: 250px; }
+.leyenda .ley-t { font-weight: 600; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.leyenda .ley-items { max-height: 34vh; overflow-y: auto; margin: 4px 0; }
+.leyenda .ley-items div { display: flex; gap: 6px; align-items: center; padding: 1px 0; white-space: nowrap; }
+.leyenda i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #0006; flex: none; }
+.leyenda small { color: var(--txt2); display: block; white-space: normal; }
 
 @media (max-width: 1000px) {
   .ico { display: block; }
