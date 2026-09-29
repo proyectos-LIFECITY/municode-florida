@@ -3,6 +3,6 @@
 (() => {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   window.MUNI_CONFIG = {
-    api: local ? '/api/municode' : '',   // URL del Worker, p. ej. 'https://municode-proxy.tu-cuenta.workers.dev'
+    api: local ? '/api/municode' : 'https://municode-proxy.lifecity.workers.dev',
   };
 })();
