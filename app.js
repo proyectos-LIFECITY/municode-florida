@@ -1,5 +1,5 @@
-import { Masa, anilloAPies } from './masa.js?v=4';
-import { PARCELAS, CONDADOS, CIUDADES, GENERALES, condadoPorCoNo, ordenCondados } from './fuentes.js?v=4';
+import { Masa, anilloAPies } from './masa.js?v=5';
+import { PARCELAS, CONDADOS, CIUDADES, GENERALES, condadoPorCoNo, ordenCondados } from './fuentes.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const API = (window.MUNI_CONFIG?.api ?? '/api/municode').replace(/\/$/, '');
@@ -267,7 +267,7 @@ function iniciarMapa() {
   if (mapa) return;
   mapa = L.map('mapa', { zoomControl: true }).setView([26.2, -80.25], 9);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© OpenStreetMap · Parcelas: Florida Statewide Cadastral',
+    maxZoom: 19, attribution: '© OpenStreetMap · Parcelas: GIS de cada condado',
   }).addTo(mapa);
   mapa.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng));
   mapa.createPane('zoning').style.zIndex = 350;   // bajo el lote, sobre el mapa base
